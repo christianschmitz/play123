@@ -1,0 +1,213 @@
+#!/bin/bash
+# wrapper around mpg321
+
+
+DIR=$HOME/.mplay
+PIPE=$DIR/pipe
+PLAYER=mpg321
+OPTS="-q -R dummy"
+MODE=""
+FILE=""
+VOLUME=$DIR/volume
+
+
+assert_dir() {
+  if [ ! -d $DIR ]
+  then
+    mkdir $DIR
+  fi
+}
+
+
+assert_pipe() {
+  if [ ! -p $PIPE ]
+  then
+    mkfifo $PIPE
+  fi
+}
+
+
+assert_open() {
+  tail -f > $PIPE &
+}
+
+
+assert_volume() {
+  if [ ! -f $VOLUME ]
+  then
+    echo "50" > $VOLUME
+  fi
+
+  volume=`cat $VOLUME`
+
+  re='^[0-9]+$'
+
+  if ! [[ $volume =~ $re ]]
+  then
+    echo "50" > $VOLUME
+  else
+    if [ $volume -lt 0 ]
+    then
+      echo "0" > $VOLUME
+    elif [ $volume -gt 100 ]
+    then
+      echo "100" > $VOLUME
+    fi
+  fi
+}
+
+
+set_vol() {
+  echo "GAIN `cat $VOLUME`" > $PIPE
+}
+
+
+toggle_mute() {
+  volume=`cat $VOLUME`
+
+  if [ $volume -gt 0 ]
+  then
+    volume=0
+  else
+    volume=50
+  fi
+
+  echo $volume > $VOLUME
+}
+
+
+assert_player() {
+  ps_count=`ps -C $PLAYER | wc -l`
+
+  if [ $ps_count -eq 1 ] 
+  then
+    assert_open
+
+    $PLAYER $OPTS < $PIPE &
+  elif [ $ps_count -gt 2 ]
+  then
+    echo "Too many instances of $PLAYER"
+    exit 1
+  fi
+}
+
+
+assert_all() {
+  assert_dir
+
+  assert_pipe
+
+  assert_player
+
+  assert_volume
+}
+
+
+seek_back() {
+  echo "jump -$1" > $PIPE
+}
+
+
+seek_forward() {
+  echo "jump +$1" > $PIPE
+}
+
+
+vol_up() {
+  old_volume=`cat $VOLUME`
+  new_volume=$(($old_volume+10))
+
+  if [ $new_volume -gt 100 ]
+  then
+    new_volume=100
+  fi
+
+  echo "$new_volume" > $VOLUME
+}
+
+
+vol_down() {
+  old_volume=`cat $VOLUME`
+  new_volume=$(($old_volume-10))
+
+  if [ $new_volume -lt 0 ]
+  then
+    new_volume=0
+  fi
+
+  echo "$new_volume" > $VOLUME
+}
+
+
+load_file() {
+  if [ ! -f $1 ]
+  then
+    echo "File $1 not found"
+    exit 1
+  fi
+
+  file=`readlink -f $1`
+  echo "LOAD $file" > $PIPE
+}
+
+
+toggle_pause() {
+  echo "PAUSE" > $PIPE
+}
+
+
+show_help() {
+  echo "Usage $0 [FILE|<|>|[|]|-|+]"
+}
+
+
+# one frame is 0.026 seconds
+# one second is 38 frames
+# one minute is 2308 frames
+# five minutes is 11538 frames
+main() {
+  if [ $# -gt 1 ]
+  then
+    show_help
+    exit 1
+  else
+    assert_all
+
+    if [ $# -eq 1 ]
+    then
+      case "${1}" in
+        "<")
+          seek_back 2308
+          ;;
+        ">")
+          seek_forward 2308
+          ;;
+        "[")
+          seek_back 11538
+          ;;
+        "]")
+          seek_forward 11538
+          ;;
+        "-")
+          vol_down
+          ;;
+        "+")
+          vol_up
+          ;;
+        "m")
+          toggle_mute
+          ;;
+        *)
+          load_file $1
+          ;;
+      esac
+    else
+      toggle_pause
+    fi
+
+    set_vol
+  fi
+}
+
+
+main $@
