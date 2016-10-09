@@ -62,20 +62,6 @@ set_vol() {
 }
 
 
-toggle_mute() {
-  volume=`cat $VOLUME`
-
-  if [ $volume -gt 0 ]
-  then
-    volume=0
-  else
-    volume=50
-  fi
-
-  echo $volume > $VOLUME
-}
-
-
 assert_player() {
   ps_count=`ps -C $PLAYER | wc -l`
 
@@ -142,7 +128,7 @@ vol_down() {
 load_file() {
   if [ ! -f $1 ]
   then
-    echo "File $1 not found"
+    >&2 echo "Error: file \"$1\" not found"
     exit 1
   fi
 
@@ -157,7 +143,13 @@ toggle_pause() {
 
 
 show_help() {
-  echo "Usage $0 [FILE|<|>|[|]|-|+]"
+  echo -e "\nUsage: ${0##*/} [FILE | < | > | [ | ] | - | + ]\n" \
+          "  < : jump -1min\n" \
+          "  > : jump +1min\n" \
+          "  [ : jump -5min\n" \
+          "  ] : jump +5min\n" \
+          "  - : vol  -10% \n" \
+          "  + : vol  +10% \n"
 }
 
 
@@ -168,6 +160,7 @@ show_help() {
 main() {
   if [ $# -gt 1 ]
   then
+    >&2 echo "Error: too many arguments"
     show_help
     exit 1
   else
@@ -194,8 +187,9 @@ main() {
         "+")
           vol_up
           ;;
-        "m")
-          toggle_mute
+        "-h")
+          show_help
+          exit 0
           ;;
         *)
           load_file $1
