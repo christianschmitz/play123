@@ -83,7 +83,7 @@ assert_player() {
   then
     assert_open
 
-    $PLAYER $OPTS < $PIPE &
+    $PLAYER $OPTS < $PIPE &> /dev/null &
   elif [ $ps_count -gt 2 ]
   then
     echo "Too many instances of $PLAYER"
