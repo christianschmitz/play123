@@ -1,8 +1,8 @@
 bind C-p exec mplay
-bind less exec mplay "<"
-bind greater exec mplay ">"
+bind comma exec mplay "<"
+bind period exec mplay ">"
 bind bracketleft exec mplay "["
 bind bracketright exec mplay "]"
-bind equal exec mplay "-"
-bind plus exec mplay "+"
+bind equal exec mplay "+"
+bind minus exec mplay "-"
 bind m exec mplay m
