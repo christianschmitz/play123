@@ -3,7 +3,7 @@ mplay
 
 Synopsis
 --------
-Wrapper around the *mpg123* mp3-playing utility, which can be easily coupled to custom key-bindings. Handles pause/play, seeking and volume. The filesystem acts as the music library manager.
+Wrapper around the **mpg123** mp3-playing utility, which makes it easier to couple it to custom key-bindings. Handles file loading, pause/play, seeking and volume. The filesystem should then act as the music library manager.
 
 Usage
 -----
@@ -19,7 +19,7 @@ Usage
 
 Details
 -------
-*mpg123* is run in remote mode in the background. **mplay** sends commands to *mpg123* via a \**nix*-pipe. If no instance of *mpg123* is running then one is started, with its stdin redirected from a fifo pipe. Beware that multiple instances of *mpg123* might conflict with eachother. The hidden folder ~/.mplay contains the volume state and the fifo pipe. This hidden folder is created if it doesn't exist.
+**mpg123** is run in remote mode in the background. **mplay** sends commands to **mpg123** via a \*nix fifo pipe. If no instance of **mpg123** is running then one is started, with its stdin redirected from the fifo pipe. Beware that multiple instances of **mpg123** might conflict with eachother. The hidden folder ~/.mplay contains the volume state and the fifo pipe. This hidden folder is created if it doesn't exist.
 
 Integration with ratpoison
 --------------------------
@@ -27,6 +27,6 @@ The included 'ratpoisonrc' file includes some bindings to **mplay**. Using **mpl
 
 Dependencies
 ------------
-- **mplay** is a *bash*-script
-- *mpg123* v1.16.0, but it might work with other versions
-- a \**nix* OS obviously (and I assume the way I set up the pipe is universal to \**nix*-based systems)
+- **mplay** is a **bash**-script
+- **mpg123** v1.16.0, but it might work with other versions
+- a \*nix OS obviously (and I assume the way I set up the pipe is universal to \*nix-based systems)
