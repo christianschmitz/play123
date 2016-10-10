@@ -4,8 +4,8 @@
 
 DIR=$HOME/.mplay
 PIPE=$DIR/pipe
-PLAYER=mpg321
-OPTS="-q -R dummy"
+PLAYER=mpg123
+OPTS="-R"
 MODE=""
 FILE=""
 VOLUME=$DIR/volume
@@ -58,7 +58,7 @@ assert_volume() {
 
 
 set_vol() {
-  echo "GAIN `cat $VOLUME`" > $PIPE
+  echo "VOLUME `cat $VOLUME`" > $PIPE
 }
 
 
