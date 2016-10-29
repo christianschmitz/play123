@@ -176,7 +176,7 @@ show_help() {
           "  - : vol  -10% \n" \
           "  + : vol  +10% \n" \
           "\nTip: make playlists with mp3wrap\n" \
-          "   mp3wrap OUTPUTFILE file1 file2 ...\n"
+          "   mp3wrap OUTPUTFILE file1 file2 ..."
 }
 
 

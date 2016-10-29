@@ -30,7 +30,3 @@ Dependencies
 - **mplay** is a **bash**-script
 - **mpg123** v1.16.0, but it might work with other versions
 - a \*nix OS obviously (and I assume the way I set up the pipe is universal to \*nix-based systems)
-
-How to create playlists
------------------------
-Use mp3wrap

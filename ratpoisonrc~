@@ -1,32 +1,7 @@
-#my own term please
-escape F13
-exec xflux -l 51 -g 4.5
-#exec "/home/christian/bin/take-a-break-launcher.sh"
-alias term exec xterm
-bind c exec xterm
-bind C-c exec xterm
-bind f exec firefox
-bind m exec rhythmbox
-defborder 0
-defpadding 0 0 0 0
-defbarpadding 0 0
-bind space exec xterm
-unbind k
-bind j focusdown
-bind h focusleft
-bind k focusup
-bind l focusright
-unbind s
-bind s hsplit
-bind q only
-
-bind C-p exec mplay
-bind less exec mplay "<"
-bind greater exec mplay ">"
+bind p exec mplay
+bind comma exec mplay "<"
+bind period exec mplay ">"
 bind bracketleft exec mplay "["
 bind bracketright exec mplay "]"
-bind equal exec mplay "-"
-bind plus exec mplay "+"
-#exec "xrdb -load ~/.Xresources"
-#exec "xrdb -merge ~/.Xresources"
-# divide screen in four frames
+bind equal exec mplay "+"
+bind minus exec mplay "-"
