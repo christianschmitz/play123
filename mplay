@@ -146,11 +146,13 @@ load_file_or_playlist() {
 }
 
 
+# only plays first song
+# TODO
 load_playlist() {
   is_file $1
 
   file=`readlink -f $1`
-  echo "LOADLIST 0 $file" > $PIPE
+  echo "LOADLIST 1 $file" > $PIPE
 }
 
 
