@@ -9,6 +9,7 @@ OPTS="-R"
 MODE=""
 FILE=""
 VOLUME=$DIR/volume
+PLAYHISTORY=$DIR/playhistory
 
 
 assert_dir() {
@@ -137,11 +138,14 @@ is_file() {
 load_file_or_playlist() {
   ext=${1#*.}
   
+  file=`readlink -f $1`
+  echo $file >> $PLAYHISTORY
+
   if [ $ext = "m3u" ]
   then
-    load_playlist $1
+    load_playlist $file
   else
-    load_file $1
+    load_file $file
   fi
 }
 
@@ -151,16 +155,14 @@ load_file_or_playlist() {
 load_playlist() {
   is_file $1
 
-  file=`readlink -f $1`
-  echo "LOADLIST 1 $file" > $PIPE
+  echo "LOADLIST 1 $1" > $PIPE
 }
 
 
 load_file() {
   is_file $1
 
-  file=`readlink -f $1`
-  echo "LOAD $file" > $PIPE
+  echo "LOAD $1" > $PIPE
 }
 
 
@@ -169,14 +171,25 @@ toggle_pause() {
 }
 
 
+repeat_last() {
+  last=`tail -1 $PLAYHISTORY`
+
+  if [ -f $last ]
+  then
+    load_file_or_playlist $last
+  fi
+}
+
+
 show_help() {
-  echo -e "\nUsage: ${0##*/} [FILE | < | > | [ | ] | - | + ]\n" \
+  echo -e "\nUsage: ${0##*/} [FILE | < | > | [ | ] | - | + | r]\n" \
           "  < : jump -1min\n" \
           "  > : jump +1min\n" \
           "  [ : jump -5min\n" \
           "  ] : jump +5min\n" \
           "  - : vol  -10% \n" \
           "  + : vol  +10% \n" \
+          "  r : repeat last file \n" \
           "\nTip: make playlists with mp3wrap\n" \
           "   mp3wrap OUTPUTFILE file1 file2 ...\n"
 }
@@ -215,6 +228,9 @@ main() {
           ;;
         "+")
           vol_up
+          ;;
+        "r")
+          repeat_last
           ;;
         "-h")
           show_help
