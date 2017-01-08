@@ -9,7 +9,7 @@ OPTS="-R"
 MODE=""
 FILE=""
 VOLUME=$DIR/volume
-PLAYHISTORY=$DIR/playhistory
+QUEU=$DIR/queu
 
 
 assert_dir() {
@@ -135,11 +135,96 @@ is_file() {
 }
 
 
+# returns two fields:
+#  line number of mark
+#  file of mark
+# if no mark is found then the last line number and file is returned
+# input is a file, so that it can work with temp files
+get_marked() {
+  file=$1
+
+  marked=`awk 'BEGIN{found=false;last_file="";}
+{
+  last_file=$1; 
+  if (NF==2 && !found) {
+    print NR, last_file;found=true;
+  }
+}
+END{if (!found){print NR, last_file}}' $file`
+
+  echo $marked
+}
+
+
+# possible modes:
+#   "last"
+#   "prev"
+#   "next"
+move_queu_mark() {
+  mode=$1
+
+  # rewrite the queue, take this opportunity to clean the queu as well
+  temp=${QUEU}.temp
+  cat $QUEU | uniq | awk '{if (NF>=1){print}}' > $temp
+
+  # current mark
+  current=`get_marked $temp | awk '{print $1}'`
+
+  # last possible mark
+  last=$((`wc -l $temp | awk '{print $1}'`))
+  # last line
+  if [ $mode == "last" ]
+  then
+    line=$last
+  elif [ $mode == "prev" ]
+  then
+    line=$((current-1))
+  elif [ $mode == "next" ]
+  then
+    line=$((current+1))
+  else
+    echo "mode $mode not recognized in function move_queu_mark()"
+    exit 1
+  fi
+
+  # bound the line
+  if [ $line -gt $last ]
+  then
+    line=$last
+  fi
+  if [ $line -le 0 ]
+  then
+    line=1
+  fi
+
+  awk "BEGIN{line=$line} {
+if (NR>=1) {
+  if (NR==line) {
+    print \$1, \"*\";
+  } else {
+    print \$1;
+  }
+}
+}" $temp | uniq > $QUEU
+
+rm $temp
+}
+
+
+queu_file_or_playlist() {
+  file=`readlink -f $1`
+  echo $file >> $QUEU
+
+  move_queu_mark "last" 
+  
+  load_file_or_playlist $1
+}
+
+
 load_file_or_playlist() {
   ext=${1#*.}
   
   file=`readlink -f $1`
-  echo $file >> $PLAYHISTORY
 
   if [ $ext = "m3u" ]
   then
@@ -171,18 +256,36 @@ toggle_pause() {
 }
 
 
-repeat_last() {
-  last=`tail -1 $PLAYHISTORY`
+play_marked() {
+  marked=`get_marked $QUEU | awk '{print $2}'`
 
-  if [ -f $last ]
+  if [ -f $marked ]
   then
-    load_file_or_playlist $last
+    load_file_or_playlist $marked
   fi
+}
+
+
+repeat_last() {
+  play_marked
+}
+
+
+play_next() {
+  move_queu_mark "next"
+  play_marked
+}
+
+
+play_prev() {
+  move_queu_mark "prev"
+  play_marked
 }
 
 
 show_help() {
   echo -e "\nUsage: ${0##*/} [FILE | < | > | [ | ] | - | + | r]\n" \
+          "  no arguments : pause/play\n" \
           "  < : jump -1min\n" \
           "  > : jump +1min\n" \
           "  [ : jump -5min\n" \
@@ -190,6 +293,8 @@ show_help() {
           "  - : vol  -10% \n" \
           "  + : vol  +10% \n" \
           "  r : repeat last file \n" \
+          "  n : play next file \n" \
+          "  p : play prev file \n" \
           "\nTip: make playlists with mp3wrap\n" \
           "   mp3wrap OUTPUTFILE file1 file2 ...\n"
 }
@@ -232,12 +337,18 @@ main() {
         "r")
           repeat_last
           ;;
+        "n")
+          play_next
+          ;;
+        "p")
+          play_prev
+          ;;
         "-h")
           show_help
           exit 0
           ;;
         *)
-          load_file_or_playlist $1
+          queu_file_or_playlist $1
           ;;
       esac
     else
