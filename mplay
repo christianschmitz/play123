@@ -213,7 +213,11 @@ rm $temp
 
 queu_file_or_playlist() {
   file=`readlink -f $1`
-  echo $file >> $QUEU
+  lastFile=`tail -1 $QUEU | awk '{print $1}'`
+  if [ $lastFile != $file ]
+  then
+    echo $file >> $QUEU
+  fi
 
   move_queu_mark "last" 
   
