@@ -58,6 +58,13 @@ assert_volume() {
 }
 
 
+assert_queu() {
+  if [ ! -f $QUEU ]
+  then
+    touch $QUEU
+  fi
+}
+
 set_vol() {
   echo "VOLUME `cat $VOLUME`" > $PIPE
 }
@@ -214,7 +221,7 @@ rm $temp
 queu_file_or_playlist() {
   file=`readlink -f $1`
   lastFile=`tail -1 $QUEU | awk '{print $1}'`
-  if [ $lastFile != $file ]
+  if [ ! $lastFile == $file ]
   then
     echo $file >> $QUEU
   fi
