@@ -4,7 +4,9 @@
 
 play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend. play123 uses a client-server approach, this makes it is easy to run over ssh.
 
-I wrote this because I couldnt get mpg321 to do exactly what I wanted (mpg321 had some performance issues as well).
+## History 
+
+I wrote this because I couldnt get mpg321 to do exactly what I wanted (I listen to long podcasts and require seeking/skipping). I first wrote a wrapper for mpg321 (named 'mplay' then). I then changed the backend to mpg123 because it has better performance and I realised I didnt need any of the extra mpg321 functionality any more. I then rewrote the play123 script (initially named 'mplay') to support sending mpg123 commands over ssh, and auto-continue when a file is finished playing.
 
 ## Usage
 
