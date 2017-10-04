@@ -2,7 +2,9 @@
 
 ## Synopsis
 
-play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend. It is easy to bind keys to play123's commands. play123 uses a client-server approach, this makes it is easy to run over ssh.
+play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend. play123 uses a client-server approach, this makes it is easy to run over ssh.
+
+I wrote this because I couldnt get mpg321 to do exactly what I wanted (mpg321 had some performance issues as well).
 
 ## Usage
 
@@ -31,6 +33,8 @@ Queu location:
 ```
 ~/.play123/queu
 ```
+
+If current file is finished playing the next file is played. If the last file is finished playing the first file is played.
 
 ## Details
 
@@ -78,6 +82,7 @@ bind F9 exec play123 prev
 
 * better support for m3u files
 * debugging and testing of network functionality, including automatic file transfer
+* smart shuffle that takes into account how many times files have been played before, and weights files based on 'novelty' 
 
 ## Copyright
 
