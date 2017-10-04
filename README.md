@@ -23,7 +23,7 @@ Play commands:
 
 If any of the arguments are valid files, these are appended to the queue. The first of these files is then set to play.
 
-Options:
+Options (only relevant when launching for first time):
 * `-r <user@host:port>`: connect to a play123 server running on `host`, requires ssh and netcat
 * `-p <port>`: start play123 as a server listening on `port`, requires netcat
 
