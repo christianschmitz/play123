@@ -1,8 +1,0 @@
-bind p exec mplay
-bind comma exec mplay "<"
-bind period exec mplay ">"
-bind bracketleft exec mplay "["
-bind bracketright exec mplay "]"
-bind equal exec mplay "+"
-bind minus exec mplay "-"
-bind r exec mplay "r"

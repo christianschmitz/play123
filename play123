@@ -1,0 +1,596 @@
+#!/bin/bash
+
+#TODO: debug and test client-server operation through ssh
+
+DRIVER=mpg123
+DRIVEROPT="-R"
+PROGRAM=${0##*/}
+ROOT=$HOME/.$PROGRAM
+DAEMONPIPE=$ROOT/daemonpipe
+DRIVERPIPE=$ROOT/driverpipe
+QUEU=$ROOT/queu
+STATE=$ROOT/state
+
+PLAYCMD="play" # command that frontend sends to daemon
+PLAYOPT=""
+
+REMOTEUSER=""
+REMOTEHOST=""
+REMOTEPORT=""
+
+LISTENPORT=""
+
+VOLUME=50
+
+debug() {
+  echo "DRIVER: " $DRIVER
+  echo "DRIVEROPT: " $DRIVEROPT
+  echo "PROGRAM: " $PROGRAM
+  echo "ROOT: " $ROOT
+  echo "DAEMONPIPE: " $DAEMOMPIPE
+  echo "DRIVERPIPE: " $DRIVERPIPE
+  echo "QUEU: " $QUEU
+  echo "STATE: " $STATE
+  echo "DAEMONCMD: " $DAEMONCMD
+  echo "PLAYCMD: " $PLAYCMD
+  echo "PLAYOPT: " $PLAYOPT
+  echo "REMOTEHOST: " $REMOTEHOST
+  echo "REMOTEPORT: " $REMOTEPORT
+  echo "REMOTEUSER: " $REMOTEUSER
+  echo "LISTENPORT: " $LISTENPORT
+  echo "VOLUME: " $VOLUME
+}
+
+
+#####################
+# Daemon functions
+#####################
+set_volume() {
+  sign=`echo $1 | sed -e 's/[0-9][0-9]*//'`
+  incr=`echo $1 | sed -e 's/[-+]//'`
+
+  VOLUME=`grep 'volume' $STATE | awk '{print $2}'`
+
+  case $sign in
+    "+")
+      VOLUME=$(($VOLUME+$incr))
+      ;;
+    "-")
+      VOLUME=$(($VOLUME-$incr))
+      ;;
+    "")
+      VOLUME=$1
+      ;;
+    "*")
+      echo "Warning: sign of volume not recognised, ignoring"
+      ;;
+  esac
+
+  if [ $VOLUME -gt 100 ]
+  then
+    VOLUME=100
+  fi
+
+  if [ $VOLUME -lt 0 ]
+  then
+    VOLUME=0
+  fi
+
+  sed -i "s/volume.*/volume $VOLUME/" $STATE
+}
+
+
+get_marked() {
+  file=$1
+
+  marked=`awk 'BEGIN{found=false;last_file="";}
+{
+  last_file=$1; 
+  if (NF==2 && !found) {
+    print NR, last_file;found=true;
+  }
+}
+END{if (!found){print NR, last_file}}' $file`
+
+  echo $marked
+}
+
+
+move_queu_mark() {
+  mode=$1
+  # can be: "last", "prev" or "next"
+
+
+  temp=${QUEU}.temp
+  cat $QUEU | uniq | awk '{if (NF>=1){print}}' > $temp
+
+  # current mark
+  current=`get_marked $temp | awk '{print $1}'`
+
+  # last possible mark
+  last=$((`wc -l $temp | awk '{print $1}'`))
+  # last line
+  if [ $mode == "last" ]
+  then
+    line=$last
+  elif [ $mode == "prev" ]
+  then
+    line=$((current-1))
+  elif [ $mode == "next" ]
+  then
+    line=$((current+1))
+  else
+    echo "Error: mode $mode not recognized in function move_queu_mark()"
+    exit 1
+  fi
+
+  # wrap around
+  if [ $line -gt $last ]
+  then
+    line=1
+  fi
+  if [ $line -le 0 ]
+  then
+    line=$last
+  fi
+
+  awk "BEGIN{line=$line} {
+if (NR>=1) {
+  if (NR==line) {
+    print \$1, \"*\";
+  } else {
+    print \$1;
+  }
+}
+}" $temp | uniq > $QUEU
+
+  rm $temp
+}
+
+
+add_to_queu() {
+  for arg in $@
+  do
+    file=$arg
+    last_file=`tail -1 $QUEU | awk '{print $1}'`
+    if [ ! $last_file == $file ] || [ -z $last_file ]
+    then
+      echo $file >> $QUEU
+    fi
+  done
+}
+
+
+run_play_cmd() {
+  case "$PLAYCMD" in
+    "seek")
+      echo "JUMP $PLAYOPT" > $DRIVERPIPE
+      ;;
+    "vol")
+      set_volume $PLAYOPT
+      echo "VOLUME $VOLUME" > $DRIVERPIPE
+      ;;
+    "next")
+      move_queu_mark "next"
+      play_marked
+      ;;
+    "prev")
+      move_queu_mark "prev"
+      play_marked
+      ;;
+    "repeat")
+      play_marked
+      ;;
+    "load")
+      add_to_queu ${PLAYOPT%%\ *}
+      move_queu_mark "last"
+      add_to_queu ${PLAYOPT##*\ }
+      play_marked
+      ;;
+    "play")
+      echo "PAUSE" > $DRIVERPIPE
+      ;;
+    "*")
+      echo "Warning: cmd not recognized, ignoring"
+      ;;
+
+  esac
+}
+
+
+is_file() {
+  if [ ! -f $1 ]
+  then
+    >&2 echo "Error: file \"$1\" not found"
+    exit 1
+  fi
+}
+
+
+load_playlist() {
+  is_file $1
+
+  echo "LOADLIST 1 $1" > $DRIVERPIPE
+}
+
+
+load_file() {
+  is_file $1
+
+  echo "LOAD $1" > $DRIVERPIPE
+}
+
+
+load_file_or_playlist() {
+  ext=${1#*.}
+  
+  file=$1
+
+  if [ $ext = "m3u" ]
+  then
+    load_playlist $file
+  else
+    load_file $file
+  fi
+}
+
+
+play_marked() {
+  marked=`get_marked $QUEU | awk '{print $2}'`
+
+  if [ -f $marked ]
+  then
+    load_file_or_playlist $marked
+  fi
+}
+
+
+# keep the driverpipe open
+loop_driver_input_writer() {
+  sed -i "s/inputwriterpid/inputwriterpid\\ $BASHPID/" $STATE
+
+  while true
+  do
+    sleep 1
+  done > $DRIVERPIPE
+}
+
+
+# stdin of this process is stdout of mpg123
+loop_driver_output_reader() {
+  sed -i "s/outputreaderpid/outputreaderpid\\ $BASHPID/" $STATE
+
+  while true
+  do
+    read line
+    if [ "$line" == "@P 0" ]
+    then
+      echo "next" > $DAEMONPIPE
+    fi
+  done
+}
+
+
+loop_server_daemon() {
+  sed -i "s/serverpid/serverpid\\ $BASHPID/" $STATE
+
+  while true
+  do
+    sleep 0.1 # needed because daemonpipe will always contain an EOF
+    read line
+    if [ ! "$line" == "" ]
+    then
+      PLAYCMD=`echo $line | awk '{print $1}'`
+      PLAYOPT=`echo $line | awk '{if (NF > 1) {print $2}}'`
+
+      run_play_cmd
+    fi
+  done < $DAEMONPIPE
+}
+
+
+loop_client_daemon() {
+  sed -i "s/clientpid/clientpid\\ $BASHPID/" $STATE
+
+  # this function is just a placeholder for the process.
+  # commands are actually directly sent through the pipe
+  while true
+  do
+    sleep 1
+  done
+}
+
+
+assert_installed() {
+  if [ -z $1 ]
+  then
+    echo "Error: " $1 " not installed"
+    exit 1
+  fi
+}
+
+
+assert_server_daemon() {
+  assert_installed $DRIVER
+
+  if [ ! -p $DRIVERPIPE ]
+  then
+    mkfifo $DRIVERPIPE
+  fi
+
+  # always reset the state
+  echo "volume $VOLUME" > $STATE
+  echo "serverpid" >> $STATE
+  echo "outputreaderpid" >> $STATE
+  echo "inputwriterpid" >> $STATE
+
+  is_driver_running=`ps -u $USER | grep $DRIVER | wc -l`
+  if [ $is_driver_running -eq 0 ]
+  then
+    loop_driver_input_writer & # is needed to keep DRIVERPIPE open at all times
+
+    echo "VOLUME $VOLUME" >  $DRIVERPIPE & # previous instance of mpg123 will have forgotten
+    $DRIVER $DRIVEROPT < $DRIVERPIPE | loop_driver_output_reader &
+  fi
+
+  if [ ! -f $QUEU ]
+  then
+    touch $QUEU
+  fi
+
+  loop_server_daemon &
+}
+
+
+assert_client_daemon() {
+  # establish the ssh tunnel
+  assert_installed ssh
+  ssh -f -L $REMOTEPORT:127.0.0.1:$REMOTEPORT play123 -p $REMOTEPORT
+  # prompt asks the user for password at this point
+
+  code=$?
+
+  if [ $code -ne 0 ]
+  then
+    echo "Error opening ssh tunnel"
+    echo "  got errorcode: " $code
+    exit 1
+  fi
+
+  assert_installed nc
+  tail -f $DAEMONPIPE | nc 127.0.0.1 $REMOTEPORT &
+
+  echo "clientpid" > $STATE
+
+  loop_client_daemon &
+}
+
+
+assert_daemon() {
+  # dont count ourself
+  ps_count=`ps -u $USER | grep $PROGRAM | wc -l` # this forks, so we will count ourselves twice anyway
+  if [ $ps_count -eq 2 ] # this will become the daemon instance
+  then
+    if [ ! -d $ROOT ]
+    then
+      mkdir $ROOT
+    fi
+
+    if [ ! -p $DAEMONPIPE ]
+    then
+      mkfifo $DAEMONPIPE
+    fi
+
+    if [ ! "$LISTENPORT" == "" ]
+    then
+      assert_installed nc
+      nc -l -k 127.0.0.1 $LISTENPORT > $DAEMONPIPE &
+    fi
+
+    if [ "$REMOTEHOST" == "" ]
+    then
+      assert_server_daemon
+    else
+      assert_client_daemon
+    fi
+  fi
+}
+
+#####################
+# Front-end functions
+#####################
+print_help() {
+  echo -e "Usage: $PROGRAM [seek [+-]<seconds> | vol [+-]<%-pt> " \
+    "| next | prev | repeat] [-r <user@host:port> ] [-p <port>] [-h] [<file(s)>]\n"\
+          "  No args: pause/play\n" \
+          "  Daemon is asserted to be running\n" \
+          "  If multiple commands are given, last one is used\n"
+}
+
+
+parse_seek_time() {
+  sign=`echo $1 | sed -e 's/[0-9][0-9]*//'`
+
+  if [ "$sign" != "-" ] && [ "$sign" != "+" ] && [ -n "$sign" ]
+  then
+    echo "Error: seek time sign must be + or -"
+    print_help
+    exit 1
+  fi
+
+  seconds=`echo $1 | sed -e 's/[-+]//'`
+  frames_per_second=38 # one frame is 0.026 seconds, so 38 frames per second
+  frames=$(($seconds * $frames_per_second))
+
+  PLAYOPT="$sign$frames"
+}
+
+
+set_seek_cmd() {
+  if [ $# -eq 0 ]
+  then
+    echo "Error: seek command requires argument"
+    print_help
+    exit 1
+  fi
+
+  unparsed=$1
+  PLAYCMD="seek"
+  parse_seek_time $unparsed
+}
+
+
+set_vol_cmd() {
+  if [ $# -eq 0 ]
+  then
+    echo "Error: vol command requires arguments"
+    print_help
+    exit 1
+  fi
+
+  PLAYCMD="vol"
+  PLAYOPT="$1"
+}
+
+
+set_next_cmd() {
+  PLAYCMD="next"
+  PLAYOPT=""
+}
+
+
+set_prev_cmd() {
+  PLAYCMD="prev"
+  PLAYOPT=""
+}
+
+
+set_repeat_cmd() {
+  PLAYCMD="repeat"
+  PLAYOPT=""
+}
+
+
+set_ssh_remote() {
+  if [ $# -eq 0 ]
+  then 
+    echo "Error: -r option requires an argument"
+    print_help
+    exit 1
+  fi
+
+  has_at="`echo $1 | grep '@'`"
+  has_colon="`echo $1 | grep ':'`"
+  is_colon_after_at="`echo $1 | grep '@.*:'`"
+
+  if [ -z $has_at ] || [ -z $has_colon ] || [ -z $is_colon_after_at ]
+  then
+    echo "Error: remote argument not in correct form"
+    print_help
+    exit 1
+  fi
+
+  REMOTEUSER=`echo $1 | sed 's/@.*//'`
+  REMOTEHOST=`echo $1 | sed -e 's/.*@//' -e 's/:.*//'`
+  REMOTEPORT=`echo $1 | sed 's/.*://'`
+
+  if [ -z $REMOTEUSER ] || [ -z $REMOTEHOST ] || [ -z $REMOTEPORT ]
+  then
+    echo "Error: unable to parse remote argument"
+    print_help
+    exit 1
+  fi
+}
+
+
+set_listen_port() {
+  if [ $# -eq 0 ]
+  then
+    echo "Error: -p option requires an argument"
+  fi
+
+  LISTENPORT=$1
+}
+
+
+detect_stray_option() {
+  is_option="`echo $1 | grep '^[-\+]'`"
+  if [ ! "$is_option" == "" ]
+  then
+    echo "Error: option $1 not recognized"
+    print_help
+    exit 1
+  fi
+}
+
+
+set_load_cmd() {
+  if [ "$PLAYCMD" != "load" ]
+  then
+    PLAYCMD="load"
+    PLAYOPT=""
+  fi
+  
+  file=`readlink -f $1`
+
+  if [ ! -f $file ]
+  then
+    echo "Error: file $file not found"
+    exit 1
+  fi
+
+  PLAYOPT="$PLAYOPT $file"
+}
+
+
+main() {
+  # loop the arguments
+  while [ $# -ne 0 ]
+  do
+    arg=$1
+    shift
+
+    case "$arg" in
+      "seek")
+        set_seek_cmd $@
+        shift
+        ;;
+      "vol")
+        set_vol_cmd $@
+        shift
+        ;;
+      "next")
+        set_next_cmd
+        ;;
+      "prev")
+        set_prev_cmd
+        ;;
+      "repeat")
+        set_repeat_cmd
+        ;;
+      "-r")
+        set_ssh_remote $@
+        shift
+        ;;
+      "-p")
+        set_listen_port $@
+        shift
+        ;;
+      "-h")
+        print_help
+        exit 0
+        ;;
+      *)
+        detect_stray_option $arg
+        set_load_cmd $arg
+        ;;
+    esac
+  done
+
+  assert_daemon
+
+  echo $PLAYCMD $PLAYOPT > $DAEMONPIPE &
+}
+
+
+main $@
