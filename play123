@@ -260,9 +260,8 @@ loop_driver_input_writer() {
 loop_driver_output_reader() {
   sed -i "s/outputreaderpid/outputreaderpid\\ $BASHPID/" $STATE
 
-  while true
+  while read line
   do
-    read line
     if [ "$line" == "@P 0" ]
     then
       echo "next" > $DAEMONPIPE
@@ -276,7 +275,7 @@ loop_server_daemon() {
 
   while true
   do
-    sleep 0.1 # needed because daemonpipe will always contain an EOF
+    sleep 0.1 # needed because daemonpipe will always contain an EOF, and read will always return immediately
     read line
     if [ ! "$line" == "" ]
     then
