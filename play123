@@ -16,9 +16,6 @@ PLAYOPT=""
 
 REMOTEUSER=""
 REMOTEHOST=""
-REMOTEPORT=""
-
-LISTENPORT=""
 
 # default volume, volume is also reset to this every time daemon is restarted (to avoid situations where a muted player seems like it isnt working)
 VOLUME=5
@@ -38,7 +35,6 @@ debug() {
   echo "REMOTEHOST: " $REMOTEHOST
   echo "REMOTEPORT: " $REMOTEPORT
   echo "REMOTEUSER: " $REMOTEUSER
-  echo "LISTENPORT: " $LISTENPORT
   echo "VOLUME: " $VOLUME
 }
 
@@ -183,9 +179,9 @@ run_play_cmd() {
       play_marked
       ;;
     "load")
-      add_to_queu ${PLAYOPT%%\ *}
+      add_to_queu ${PLAYOPT%% *}
       move_queu_mark "last"
-      add_to_queu ${PLAYOPT##*\ }
+      add_to_queu ${PLAYOPT#* }
       play_marked
       ;;
     "play")
@@ -246,19 +242,8 @@ play_marked() {
 }
 
 
-# netcat is very bad at keeping stdout pipe open
-loop_netcat_output_reader() {
-  while read line
-  do
-    echo $line > $DAEMONPIPE
-  done
-}
-
-
 # keep the driverpipe open
 loop_driver_input_writer() {
-  sed -i "s/inputwriterpid/inputwriterpid\\ $BASHPID/" $STATE
-
   while true
   do
     sleep 1
@@ -268,8 +253,6 @@ loop_driver_input_writer() {
 
 # stdin of this process is stdout of mpg123
 loop_driver_output_reader() {
-  sed -i "s/outputreaderpid/outputreaderpid\\ $BASHPID/" $STATE
-
   while read line
   do
     if [ "$line" == "@P 0" ]
@@ -280,9 +263,7 @@ loop_driver_output_reader() {
 }
 
 
-loop_server_daemon() {
-  sed -i "s/serverpid/serverpid\\ $BASHPID/" $STATE
-
+loop_daemon() {
   while true
   do
     sleep 0.1 # needed because daemonpipe will always contain an EOF, and read will always return immediately
@@ -290,29 +271,9 @@ loop_server_daemon() {
     if [ ! "$line" == "" ]
     then
       PLAYCMD=`echo $line | awk '{print $1}'`
-      PLAYOPT=`echo $line | awk '{if (NF > 1) {print $2}}'`
+      PLAYOPT=`echo $line | sed 's/[a-z]*\ *//'`
 
       run_play_cmd
-    fi
-  done < $DAEMONPIPE
-}
-
-
-loop_client_daemon() {
-  sed -i "s/clientpid/clientpid\\ $BASHPID/" $STATE
-
-  # this function is just a placeholder for the process.
-  # commands are actually directly sent through the pipe
-
-  # keep restarting
-  while true
-  do
-    sleep 0.1
-    read line
-    if [ ! "$line" == "" ]
-    then
-      echo $line
-      echo $line | nc -q 0 127.0.0.1 $REMOTEPORT
     fi
   done < $DAEMONPIPE
 }
@@ -327,7 +288,17 @@ assert_installed() {
 }
 
 
-assert_server_daemon() {
+assert_necessary_files() {
+  if [ ! -d $ROOT ]
+  then
+    mkdir $ROOT
+  fi
+
+  if [ ! -p $DAEMONPIPE ]
+  then
+    mkfifo $DAEMONPIPE
+  fi
+
   assert_installed $DRIVER
 
   if [ ! -p $DRIVERPIPE ]
@@ -335,49 +306,17 @@ assert_server_daemon() {
     mkfifo $DRIVERPIPE
   fi
 
-  # always reset the state
-  echo "volume $VOLUME" > $STATE
-  echo "serverpid" >> $STATE
-  echo "outputreaderpid" >> $STATE
-  echo "inputwriterpid" >> $STATE
-
-  is_driver_running=`ps -u $USER | grep $DRIVER | wc -l`
-  if [ $is_driver_running -eq 0 ]
-  then
-    loop_driver_input_writer & # is needed to keep DRIVERPIPE open at all times
-
-    echo "VOLUME $VOLUME" >  $DRIVERPIPE & # previous instance of mpg123 will have forgotten
-    $DRIVER $DRIVEROPT < $DRIVERPIPE | loop_driver_output_reader &
-  fi
-
   if [ ! -f $QUEU ]
   then
     touch $QUEU
   fi
 
-  loop_server_daemon &
-}
-
-
-assert_client_daemon() {
-  # establish the ssh tunnel
-  assert_installed ssh
-  ssh -f -L $REMOTEPORT:127.0.0.1:$REMOTEPORT $REMOTEUSER@$REMOTEHOST play123 -p $REMOTEPORT
-  # prompt asks the user for password at this point
-
-  code=$?
-
-  if [ $code -ne 0 ]
+  if [ ! -f $STATE ]
   then
-    echo "Error opening ssh tunnel"
-    echo "  got errorcode: " $code
-    exit 1
+    echo "volume $VOUME" > $STATE
   fi
 
-  echo "clientpid" > $STATE
-
-  assert_installed nc
-  loop_client_daemon &
+  sed -i "s/volume.*/volume\\ $VOLUME/" $STATE
 }
 
 
@@ -386,37 +325,28 @@ assert_daemon() {
   ps_count=`ps -u $USER | grep $PROGRAM | wc -l` # this forks, so we will count ourselves twice anyway
   if [ $ps_count -eq 2 ] # this will become the daemon instance
   then
-    if [ ! -d $ROOT ]
+    assert_necessary_files
+
+    is_driver_running=`ps -u $USER | grep $DRIVER | wc -l`
+    if [ $is_driver_running -eq 0 ]
     then
-      mkdir $ROOT
+      loop_driver_input_writer & # is needed to keep DRIVERPIPE open at all times
+
+      echo "VOLUME $VOLUME" >  $DRIVERPIPE & # previous instance of mpg123 will have forgotten
+      $DRIVER $DRIVEROPT < $DRIVERPIPE | loop_driver_output_reader &
     fi
 
-    if [ ! -p $DAEMONPIPE ]
-    then
-      mkfifo $DAEMONPIPE
-    fi
-
-    if [ ! "$LISTENPORT" == "" ]
-    then
-      assert_installed nc
-      nc -l -k 127.0.0.1 $LISTENPORT | loop_netcat_output_reader &
-    fi
-
-    if [ "$REMOTEHOST" == "" ]
-    then
-      assert_server_daemon
-    else
-      assert_client_daemon
-    fi
+    loop_daemon &
   fi
 }
+
 
 #####################
 # Front-end functions
 #####################
 print_help() {
   echo -e "Usage: $PROGRAM [seek [+-]<seconds> | vol [+-]<%-pt> " \
-    "| next | prev | repeat] [-r <user@host:port> ] [-p <port>] [-h] [<file(s)>]\n"\
+    "| next | prev | repeat] [-h] [<file(s)>]\n"\
           "  No args: pause/play\n" \
           "  Daemon is asserted to be running\n" \
           "  If multiple commands are given, last one is used\n"
@@ -487,44 +417,27 @@ set_repeat_cmd() {
 
 
 set_ssh_remote() {
-  if [ $# -eq 0 ]
-  then 
-    echo "Error: -r option requires an argument"
-    print_help
-    exit 1
-  fi
+  str=`grep "remote" $STATE | tail -1 | awk '{print $2}'`
 
-  has_at="`echo $1 | grep '@'`"
-  has_colon="`echo $1 | grep ':'`"
-  is_colon_after_at="`echo $1 | grep '@.*:'`"
-
-  if [ -z $has_at ] || [ -z $has_colon ] || [ -z $is_colon_after_at ]
+  if [ ! "$str" == "" ]
   then
-    echo "Error: remote argument not in correct form"
-    print_help
-    exit 1
+    has_at="`echo $str | grep '@'`"
+
+    if [ -z $has_at ]
+    then
+      echo "Error: remote in $STATE not in correct form"
+      exit 1
+    fi
+
+    REMOTEUSER=`echo $str | sed 's/@.*//'`
+    REMOTEHOST=`echo $str | sed -e 's/.*@//' -e 's/:.*//'`
+
+    if [ -z $REMOTEUSER ] || [ -z $REMOTEHOST ]
+    then
+      echo "Error: unable to parse remote in $STATE"
+      exit 1
+    fi
   fi
-
-  REMOTEUSER=`echo $1 | sed 's/@.*//'`
-  REMOTEHOST=`echo $1 | sed -e 's/.*@//' -e 's/:.*//'`
-  REMOTEPORT=`echo $1 | sed 's/.*://'`
-
-  if [ -z $REMOTEUSER ] || [ -z $REMOTEHOST ] || [ -z $REMOTEPORT ]
-  then
-    echo "Error: unable to parse remote argument"
-    print_help
-    exit 1
-  fi
-}
-
-
-set_listen_port() {
-  if [ $# -eq 0 ]
-  then
-    echo "Error: -p option requires an argument"
-  fi
-
-  LISTENPORT=$1
 }
 
 
@@ -559,52 +472,52 @@ set_load_cmd() {
 
 
 main() {
-  # loop the arguments
-  while [ $# -ne 0 ]
-  do
-    arg=$1
-    shift
+  set_ssh_remote
 
-    case "$arg" in
-      "seek")
-        set_seek_cmd $@
-        shift
-        ;;
-      "vol")
-        set_vol_cmd $@
-        shift
-        ;;
-      "next")
-        set_next_cmd
-        ;;
-      "prev")
-        set_prev_cmd
-        ;;
-      "repeat")
-        set_repeat_cmd
-        ;;
-      "-r")
-        set_ssh_remote $@
-        shift
-        ;;
-      "-p")
-        set_listen_port $@
-        shift
-        ;;
-      "-h")
-        print_help
-        exit 0
-        ;;
-      *)
-        detect_stray_option $arg
-        set_load_cmd $arg
-        ;;
-    esac
-  done
+  if [ ! "$REMOTEHOST" == "" ] && [ ! "$REMOTEUSER" == "" ] 
+  then
+    ssh $REMOTEUSER@$REMOTEHOST $PROGRAM $@
+  else 
+    # loop the arguments
+    while [ $# -ne 0 ]
+    do
+      arg=$1
+      shift
 
-  assert_daemon
+      case "$arg" in
+        "seek")
+          set_seek_cmd $@
+          shift
+          ;;
+        "vol")
+          set_vol_cmd $@
+          shift
+          ;;
+        "next")
+          set_next_cmd
+          ;;
+        "prev")
+          set_prev_cmd
+          ;;
+        "repeat")
+          set_repeat_cmd
+          ;;
+        "-h")
+          print_help
+          exit 0
+          ;;
+        *)
+          detect_stray_option $arg
+          set_load_cmd $arg
+          shift
+          ;;
+      esac
+    done
 
-  echo $PLAYCMD $PLAYOPT > $DAEMONPIPE &
+    assert_daemon
+
+    echo $PLAYCMD $PLAYOPT > $DAEMONPIPE &
+  fi
 }
 
 

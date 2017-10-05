@@ -2,7 +2,7 @@
 
 ## Synopsis
 
-play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend. play123 uses a client-server approach, this makes it is easy to run over ssh.
+play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend.
 
 ## History 
 
@@ -11,7 +11,7 @@ I wrote this because I couldnt get mpg321 to do exactly what I wanted (I listen 
 ## Usage
 
 ```
-play123 [-r <user@host:port> ] [-p <port>] [-h] [<play-command> | <file(s)>]
+play123 [-h] [<play-command> | <file(s)>]
 ```
 
 Play commands:
@@ -23,10 +23,6 @@ Play commands:
 
 If any of the arguments are valid files, these are appended to the queue. The first of these files is then set to play.
 
-Options (only relevant when launching for first time):
-* `-r <user@host:port>`: connect to a play123 server running on `host`, requires ssh and netcat
-* `-p <port>`: start play123 as a server listening on `port`, requires netcat
-
 Without arguments play123 pauses/plays current file.
 
 Only one command is parsed per call. Appending file(s) is treated as one command. If multiple commands are specified only the last is parsed.
@@ -37,6 +33,12 @@ Queu location:
 ```
 
 If current file is finished playing the next file is played. If the last file is finished playing the first file is played.
+
+To send commands over ssh put the following line in ~/.play123/state:
+```
+remote <user@host>
+```
+This requires public key authentication, or other passwordless method, to be set up. Remember to remove this line if you want to control the local machine again.
 
 ## Details
 
@@ -83,7 +85,6 @@ bind F9 exec play123 prev
 ## Todo
 
 * better support for m3u files
-* debugging and testing of network functionality, including automatic file transfer
 * smart shuffle that takes into account how many times files have been played before, and weights files based on 'novelty' 
 
 ## Copyright
