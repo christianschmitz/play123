@@ -18,7 +18,7 @@ REMOTEUSER=""
 REMOTEHOST=""
 
 # default volume, volume is also reset to this every time daemon is restarted (to avoid situations where a muted player seems like it isnt working)
-VOLUME=5
+VOLUME=50
 
 debug() {
   echo "DRIVER: " $DRIVER
