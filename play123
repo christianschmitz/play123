@@ -21,7 +21,7 @@ REMOTEPORT=""
 LISTENPORT=""
 
 # default volume, volume is also reset to this every time daemon is restarted (to avoid situations where a muted player seems like it isnt working)
-VOLUME=50
+VOLUME=5
 
 debug() {
   echo "DRIVER: " $DRIVER
@@ -246,6 +246,15 @@ play_marked() {
 }
 
 
+# netcat is very bad at keeping stdout pipe open
+loop_netcat_output_reader() {
+  while read line
+  do
+    echo $line > $DAEMONPIPE
+  done
+}
+
+
 # keep the driverpipe open
 loop_driver_input_writer() {
   sed -i "s/inputwriterpid/inputwriterpid\\ $BASHPID/" $STATE
@@ -294,10 +303,18 @@ loop_client_daemon() {
 
   # this function is just a placeholder for the process.
   # commands are actually directly sent through the pipe
+
+  # keep restarting
   while true
   do
-    sleep 1
-  done
+    sleep 0.1
+    read line
+    if [ ! "$line" == "" ]
+    then
+      echo $line
+      echo $line | nc -q 0 127.0.0.1 $REMOTEPORT
+    fi
+  done < $DAEMONPIPE
 }
 
 
@@ -345,7 +362,7 @@ assert_server_daemon() {
 assert_client_daemon() {
   # establish the ssh tunnel
   assert_installed ssh
-  ssh -f -L $REMOTEPORT:127.0.0.1:$REMOTEPORT play123 -p $REMOTEPORT
+  ssh -f -L $REMOTEPORT:127.0.0.1:$REMOTEPORT $REMOTEUSER@$REMOTEHOST play123 -p $REMOTEPORT
   # prompt asks the user for password at this point
 
   code=$?
@@ -357,11 +374,9 @@ assert_client_daemon() {
     exit 1
   fi
 
-  assert_installed nc
-  tail -f $DAEMONPIPE | nc 127.0.0.1 $REMOTEPORT &
-
   echo "clientpid" > $STATE
 
+  assert_installed nc
   loop_client_daemon &
 }
 
@@ -384,7 +399,7 @@ assert_daemon() {
     if [ ! "$LISTENPORT" == "" ]
     then
       assert_installed nc
-      nc -l -k 127.0.0.1 $LISTENPORT > $DAEMONPIPE &
+      nc -l -k 127.0.0.1 $LISTENPORT | loop_netcat_output_reader &
     fi
 
     if [ "$REMOTEHOST" == "" ]
