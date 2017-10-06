@@ -60,6 +60,13 @@ To kill all play123 related processes you can use the killall command (part of p
 killall play123 mpg123
 ```
 
+## Installation
+
+Copy to a location in your PATH. If you want to use it on an ssh server it must be copied to a standard PATH directory:
+```
+ssh <user@host> echo \$PATH
+```
+
 ## Keybinding example: ratpoison
 
 In ~/.ratpoisonrc:
