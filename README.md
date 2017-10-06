@@ -20,6 +20,7 @@ Play commands:
 * `next`: play next file in queu
 * `prev`: play previous file in queu
 * `repeat`: play marked file in queu
+* `info` : print current track
 
 If any of the arguments are valid files, these are appended to the queue. The first of these files is then set to play.
 
@@ -80,7 +81,7 @@ bind F9 exec play123 prev
 * a linux system
 * bash
 * mpg123 (tested with versions 1.16.0 and 1.23.8)
-* netcat and ssh when using network functionality
+* ssh when using network functionality
 
 ## Todo
 

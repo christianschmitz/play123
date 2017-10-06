@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#TODO: debug and test client-server operation through ssh
-
 DRIVER=mpg123
 DRIVEROPT="-R"
 PROGRAM=${0##*/}
@@ -80,16 +78,14 @@ set_volume() {
 get_marked() {
   file=$1
 
-  marked=`awk 'BEGIN{found=false;last_file="";}
+  awk 'BEGIN{found=0;last_file="";}
 {
   last_file=$1; 
-  if (NF==2 && !found) {
-    print NR, last_file;found=true;
+  if (NF==2 && found==0) {
+    print NR, last_file;found=0;
   }
 }
-END{if (!found){print NR, last_file}}' $file`
-
-  echo $marked
+END{if (found==0){print NR, last_file}}' $file
 }
 
 
@@ -346,7 +342,7 @@ assert_daemon() {
 #####################
 print_help() {
   echo -e "Usage: $PROGRAM [seek [+-]<seconds> | vol [+-]<%-pt> " \
-    "| next | prev | repeat] [-h] [<file(s)>]\n"\
+    "| next | prev | repeat | info] [-h] [<file(s)>]\n"\
           "  No args: pause/play\n" \
           "  Daemon is asserted to be running\n" \
           "  If multiple commands are given, last one is used\n"
@@ -476,7 +472,16 @@ main() {
 
   if [ ! "$REMOTEHOST" == "" ] && [ ! "$REMOTEUSER" == "" ] 
   then
+    assert_installed ssh
     ssh $REMOTEUSER@$REMOTEHOST $PROGRAM $@
+    code=$?
+
+    if [ $code -ne 0 ]
+    then
+      echo "Error: ssh returned $code"
+      exit $code
+    fi
+
   else 
     # loop the arguments
     while [ $# -ne 0 ]
@@ -501,6 +506,10 @@ main() {
           ;;
         "repeat")
           set_repeat_cmd
+          ;;
+        "info")
+          get_marked $QUEU
+          exit 0
           ;;
         "-h")
           print_help
