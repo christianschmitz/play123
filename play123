@@ -249,15 +249,15 @@ loop_driver_input_writer() {
 
 # stdin of this process is stdout of mpg123
 loop_driver_output_reader() {
-  started=false
+  first_run=true
   while read line
   do
     if [ "$line" == "@P 0" ]
     then
-      if [ ! $started ]
+      if $first_run
       then
         echo "repeat" > $DAEMONPIPE
-        started=true
+        first_run=false
       else
         echo "next" > $DAEMONPIPE
       fi
