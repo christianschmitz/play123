@@ -98,7 +98,7 @@ move_queu_mark() {
   cat $QUEU | uniq | awk '{if (NF>=1){print}}' > $temp
 
   # current mark
-  current=`get_marked $temp | awk '{print $1}'`
+  current=$((`get_marked $temp | awk '{print $1}'`))
 
   # last possible mark
   last=$((`wc -l $temp | awk '{print $1}'`))
