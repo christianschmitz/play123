@@ -525,7 +525,6 @@ main() {
         *)
           detect_stray_option $arg
           set_load_cmd $arg
-          shift
           ;;
       esac
     done
