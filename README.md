@@ -3,10 +3,7 @@
 ## Synopsis
 
 play123 is a simple mp3 playlist manager. It uses the mpg123 console player as a backend.
-
-## History 
-
-I wrote this because I couldnt get mpg321 to do exactly what I wanted (I listen to long podcasts and require seeking/skipping). I first wrote a wrapper for mpg321. I then changed the backend to mpg123 because it has better performance and I realised I didnt need any of the extra mpg321 functionality any more. More recently I rewrote the play123 script to support sending mpg123 commands over ssh, and also to auto-continue when a file is finished playing.
+play123 also wraps Spotify (if `ps` detect the desktop app).
 
 ## Usage
 
@@ -85,7 +82,7 @@ bind F9 exec play123 prev
 
 ## Dependencies
 
-* a linux system
+* a linux os
 * bash
 * mpg123 (tested with versions 1.16.0 and 1.23.8)
 * ssh when using network functionality
@@ -94,10 +91,6 @@ bind F9 exec play123 prev
 
 * better support for m3u files
 * smart shuffle that takes into account how many times files have been played before, and weights files based on 'novelty' 
-
-## Copyright
-
-Christian Schmitz
 
 ## Contact
 
