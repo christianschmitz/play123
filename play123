@@ -9,8 +9,24 @@ DRIVERPIPE=$ROOT/driverpipe
 QUEU=$ROOT/queu
 STATE=$ROOT/state
 
+CURL=/usr/bin/curl
+BROWSER=/usr/bin/iceweasel
+NETCAT=/bin/nc
+SPOTIFYCLIENT=spotify
+SPOTIFYID=c7548bbf61a44423b363f22db048a593
+SPOTIFYSECRET=b572aed5a8354a738158d655cfa0a661
+SPOTIFYTOKEN=$ROOT/spotifytoken
+SPOTIFYAUTHPIPE=$ROOT/spotifypipe
+SPOTIFYAUTHURL="https://accounts.spotify.com/"
+SPOTIFYAPIURL="https://api.spotify.com/"
+SPOTIFYLOCALAUTHPORT=12321
+SPOTIFYLOCALAUTHURL="http://localhost:${SPOTIFYLOCALAUTHPORT}/callback"
+
 PLAYCMD="play" # command that frontend sends to daemon
 PLAYOPT=""
+UNPARSEDSEEK=""
+SPOTIFYMODE=""
+SPOTIFYCMD=""
 
 REMOTEUSER=""
 REMOTEHOST=""
@@ -291,11 +307,16 @@ assert_installed() {
 }
 
 
-assert_necessary_files() {
+assert_root_directory() {
   if [ ! -d $ROOT ]
   then
     mkdir $ROOT
   fi
+}
+
+
+assert_necessary_files() {
+  assert_root_directory
 
   if [ ! -p $DAEMONPIPE ]
   then
@@ -316,7 +337,7 @@ assert_necessary_files() {
 
   if [ ! -f $STATE ]
   then
-    echo "volume $VOUME" > $STATE
+    echo "volume $VOLUME" > $STATE
   fi
 
   sed -i "s/volume.*/volume\\ $VOLUME/" $STATE
@@ -382,9 +403,9 @@ set_seek_cmd() {
     exit 1
   fi
 
-  unparsed=$1
+  UNPARSEDSEEK=$1
   PLAYCMD="seek"
-  parse_seek_time $unparsed
+  parse_seek_time $UNPARSEDSEEK
 }
 
 
@@ -404,18 +425,24 @@ set_vol_cmd() {
 set_next_cmd() {
   PLAYCMD="next"
   PLAYOPT=""
+  SPOTIFYMODE="POST"
+  SPOTIFYCMD="v1/me/player/next"
 }
 
 
 set_prev_cmd() {
   PLAYCMD="prev"
   PLAYOPT=""
+  SPOTIFYMODE="POST"
+  SPOTIFYCMD="v1/me/player/previous"
 }
 
 
 set_repeat_cmd() {
   PLAYCMD="repeat"
   PLAYOPT=""
+  SPOTIFYMODE="PUT"
+  SPOTIFYCMD="v1/me/player/seek?position_ms=0"
 }
 
 
@@ -474,6 +501,213 @@ set_load_cmd() {
 }
 
 
+encode_uri() {
+  nodejs -e "console.log(encodeURIComponent(\"$1\"))"
+}
+
+
+decode_uri() {
+  nodejs -e "console.log(decodeURIComponent(\"$1\"))"
+}
+
+
+spotify_download_token() {
+  URL=${SPOTIFYAUTHURL}"api/token"
+
+  OPT=""
+  if [ $# -eq 1 ]
+  then
+    OPT=${OPT}" -d grant_type=authorization_code"
+    OPT=${OPT}" -d code="$(encode_uri "$1")
+    OPT=${OPT}" -d redirect_uri="$(encode_uri "$SPOTIFYLOCALAUTHURL")
+  elif [ $# -eq 0 ]
+  then
+    OPT=${OPT}" -d grant_type=client_credentials"
+  else
+    echo "Internal Error: bad number of arguments to spotify_download_token function"
+    exit 1
+  fi
+
+  $CURL -s -X "POST" $OPT --basic -u ${SPOTIFYID}:${SPOTIFYSECRET} $URL > $SPOTIFYTOKEN
+
+  if [ $? -ne 0 ]
+  then
+    echo "Error: spotify connectivity problem"
+    exit 1
+  fi
+
+  if [ `grep "error" $SPOTIFYTOKEN | wc -l` -gt 0 ]
+  then
+    echo "Error: bad spotify client credentials or no connectivity"
+    exit 1
+  fi
+}
+
+
+
+spotify_authenticate() {
+  # fork netcat (keeps listening until browser closes page)
+  $NETCAT -l -p $SPOTIFYLOCALAUTHPORT > $SPOTIFYAUTHPIPE &
+  
+  # direct browser to spotify login
+  URL=${SPOTIFYAUTHURL}"authorize?"
+  URL=${URL}"client_id="$(encode_uri $SPOTIFYID)
+  URL=${URL}"&response_type=code"
+  URL=${URL}"&redirect_uri="$(encode_uri "$SPOTIFYLOCALAUTHURL")
+  URL=${URL}"&scope="$(encode_uri "user-modify-playback-state user-read-playback-state")
+
+  $BROWSER $URL
+
+  CODE=""
+  while true
+  do
+    sleep 0.1 # needed because daemonpipe will always contain an EOF, and read will always return immediately
+    read line
+    if [ ! "$line" == "" ]
+    then
+      if [ `echo $line | grep "GET" | wc -l` -gt 0 ]
+      then
+        CODE=`echo $line | sed -e "s/.*GET\ .*\?code=\([a-zA-Z0-9_=\-]*\).*/\1/"`
+        break
+      fi
+    fi
+  done < $SPOTIFYAUTHPIPE
+
+  spotify_download_token $CODE
+}
+
+
+spotify_assert_files() {
+  # similar to assert_necessary_files
+  assert_root_directory
+
+  if [ ! -p $SPOTIFYAUTHPIPE ]
+  then
+    mkfifo $SPOTIFYAUTHPIPE
+  fi
+
+  if [ ! -f $SPOTIFYTOKEN ]
+  then
+    spotify_authenticate
+  fi
+}
+
+
+spotify_extract_token_field() {
+  key=$1
+
+  sed "s/[\{\"}:,]/\ /g" $SPOTIFYTOKEN | awk "{
+  for (i=2; i <= NF; i++) {
+    if (\$(i-1) == \"$key\") {
+      print \$i
+    }
+  }
+}"
+}
+
+
+spotify_refresh_token() {
+  token=`spotify_extract_token_field "refresh_token"`
+
+  URL=${SPOTIFYAUTHURL}"api/token?"
+  URL=${URL}"grant_type=refresh_token"
+  URL=${URL}"&refresh_token="$token
+  URL=${URL}"&redirect_uri="$(encode_uri "$SPOTIFYLOCALAUTHURL")
+
+  $CURL -s -X "POST" --basic -u ${SPOTIFYID}:${SPOTIFYSECRET} $URL > $SPOTIFYTOKEN
+
+  if [ $? -ne 0 ]
+  then
+    echo "Error: spotify refresh token connectivity problem"
+    exit 1
+  fi
+
+  if [ `grep "error" $SPOTIFYTOKEN | wc -l` -gt 0 ]
+  then
+    echo "Error: bad spotify client credentials or no connectivity for refresh token"
+    exit 1
+  fi
+}
+
+
+spotify_assert_token() {
+  # extract the expires_in field from the token 
+  delay=`spotify_extract_token_field "expires_in"`
+
+  # token modification/creation date
+  created=`stat -c %y $SPOTIFYTOKEN`
+  created=`date '+%s' -d "$created"`
+
+  expiry=$(($created + $delay))
+
+  now=`date '+%s'`
+
+  if [ $now -gt $expiry ]
+  then
+    spotify_download_token
+  fi
+}
+
+
+spotify_send_command() {
+  bearer=`spotify_extract_token_field "access_token"`
+  $CURL -s -X "$1" -H "Authorization: Bearer $bearer" $2
+}
+
+
+spotify_set_play_cmd() {
+  URL=$SPOTIFYAPIURL"v1/me/player/currently-playing"
+
+  is_playing=`spotify_send_command "GET" $URL | sed -n -e 's/.*\"is_playing\"\ *\:\ *\(true\|false\).*/\1/p'`
+
+  if [ "$is_playing" == "true" ]
+  then
+    SPOTIFYMODE="PUT"
+    SPOTIFYCMD="v1/me/player/pause"
+  else
+    SPOTIFYMODE="PUT"
+    SPOTIFYCMD="v1/me/player/play"
+  fi
+}
+
+
+spotify_set_seek_cmd() {
+  URL=$SPOTIFYAPIURL"v1/me/player/currently-playing"
+  progress=$(spotify_send_command "GET" $URL | sed -n -e 's/.*\"progress_ms\"\ *\:\ *\([0-9]*\).*/\1/p')
+
+  if [ "$progress" != "" ]
+  then
+    sign=`echo $UNPARSEDSEEK | sed -e 's/[0-9][0-9]*//'`
+    seconds=`echo $UNPARSEDSEEK | sed -e 's/[-+]//'`
+    new_pos=$progress
+
+    if [ "$sign" == "-" ]
+    then
+      new_pos=$(($progress - $(($seconds * 1000)) ))
+    elif [ "$sign" == "+" ]
+    then
+      new_pos=$(($progress + $(($seconds * 1000)) ))
+    else
+      echo "Internal Error: this error should've been caught in set_seek_cmd()"
+      exit 1
+    fi
+
+    SPOTIFYMODE="PUT"
+    SPOTIFYCMD="v1/me/player/seek?position_ms="$new_pos
+  else
+    echo "Error: failed to seek spotify"
+    exit 1
+  fi
+}
+
+
+spotify_run_command() {
+  URL=${SPOTIFYAPIURL}${SPOTIFYCMD}
+
+  spotify_send_command $SPOTIFYMODE $URL
+}
+
+
 main() {
   set_ssh_remote
 
@@ -529,9 +763,25 @@ main() {
       esac
     done
 
-    assert_daemon
+    spotify_running=`ps -u $USER | grep $SPOTIFYCLIENT | wc -l`
+    if [ $spotify_running -gt 0 ]
+    then
+      spotify_assert_files
+      spotify_assert_token
 
-    echo $PLAYCMD $PLAYOPT > $DAEMONPIPE &
+      if [ "$PLAYCMD" == "play" ]
+      then
+        spotify_set_play_cmd
+      elif [ "$PLAYCMD" == "seek" ]
+      then
+        spotify_set_seek_cmd
+      fi
+
+      spotify_run_command
+    else
+      assert_daemon
+      echo $PLAYCMD $PLAYOPT > $DAEMONPIPE &
+    fi
   fi
 }
 
